@@ -34,7 +34,7 @@ ${colors.yellow}OPTIONS:${colors.reset}
   --generate-html    Generate HTML report from JSONL file
   --index           Generate conversation summaries and index for .claude-trace/ directory
   --run-with         Pass all following arguments to Claude process
-  --include-all-requests Include all requests made through fetch, otherwise only requests to v1/messages with more than 2 messages in the context
+  --include-all-requests, --all Include all requests made through fetch, otherwise only requests to v1/messages with more than 2 messages in the context
   --include-sensitive-headers Log sensitive headers (auth tokens, cookies) without redaction
   --no-open          Don't open generated HTML file in browser
   --log              Specify custom log file base name (without extension)
@@ -687,8 +687,9 @@ async function main(): Promise<void> {
 		process.exit(0);
 	}
 
-	// Check for include all requests flag
-	const includeAllRequests = claudeTraceArgs.includes("--include-all-requests");
+	// Check for include all requests flag (--all is a short alias)
+	const includeAllRequests =
+		claudeTraceArgs.includes("--include-all-requests") || claudeTraceArgs.includes("--all");
 
 	// Check for no-open flag (inverted logic - open by default)
 	const openInBrowser = !claudeTraceArgs.includes("--no-open");
