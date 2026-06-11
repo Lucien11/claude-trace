@@ -1,6 +1,6 @@
 {
 	"name": "@lucien_lc/claude-trace",
-	"version": "1.0.0",
+	"version": "1.0.9",
 	"description": "Record all your interactions with Claude Code. Fork of @mariozechner/claude-trace with native-binary support and a configurable upstream that follows ANTHROPIC_BASE_URL (works with relays/gateways).",
 	"main": "dist/index.js",
 	"bin": {
