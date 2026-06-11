@@ -22,7 +22,7 @@ npm install -g @lucien_lc/claude-trace
 claude-trace
 
 # Include all API requests (by default, only substantial conversations are logged)
-claude-trace --include-all-requests   # or the short form: claude-trace --all
+claude-trace --all   # or the long form: claude-trace --include-all-requests
 
 # Run Claude with specific arguments
 claude-trace --run-with chat --model sonnet-3.5
