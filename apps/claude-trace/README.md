@@ -2,10 +2,17 @@
 
 Record all your interactions with Claude Code as you develop your projects. See everything Claude hides: system prompts, tool outputs, and raw API data in an intuitive web interface.
 
+> **Fork notice.** This is a fork of [`@mariozechner/claude-trace`](https://github.com/mariozechner/claude-trace) by Mario Zechner. It adds two things on top of the original:
+>
+> - **Native-binary support** — works with Claude Code's native (Bun-compiled) installer, not just the Node.js install. Native binaries are detected automatically and traced through a local reverse proxy (originally contributed by Richard-Weiss).
+> - **Configurable upstream** — the proxy forwards to whatever `ANTHROPIC_BASE_URL` you use (a relay, gateway, or self-hosted endpoint), instead of always going to `api.anthropic.com`. When unset, it falls back to the official API, so existing setups are unaffected.
+>
+> See [New in this fork](#new-in-this-fork) for details. All original functionality is unchanged.
+
 ## Install
 
 ```bash
-npm install -g @mariozechner/claude-trace
+npm install -g @lucien_lc/claude-trace
 ```
 
 ## Usage
@@ -77,6 +84,49 @@ This feature:
 - **Interactive HTML viewer** - Browse conversations with model filtering
 - **Debug views** - Raw calls shows all HTTP requests without filtering; JSON debug shows processed API data
 - **Conversation indexing** - AI-generated summaries and searchable index of all sessions
+
+## New in this fork
+
+These capabilities are additions on top of the upstream `@mariozechner/claude-trace`.
+
+### Native-binary support
+
+Recent Claude Code releases ship as a self-contained native binary (a Bun-compiled
+bundle) rather than a Node.js script. The original `--require` interceptor only works
+with the Node.js build, so tracing silently failed on native installs.
+
+This fork detects native binaries by their magic bytes (Mach-O, ELF, PE) and, when one
+is found, traces it through a local HTTP reverse proxy instead of the interceptor. No
+configuration is needed — it is automatic:
+
+```bash
+claude-trace            # works whether claude is a Node.js script or a native binary
+```
+
+### Configurable upstream (follows `ANTHROPIC_BASE_URL`)
+
+The reverse proxy no longer hard-codes `https://api.anthropic.com`. It forwards to the
+base URL you actually use, resolved in this order:
+
+1. `ANTHROPIC_BASE_URL` from the environment
+2. `env.ANTHROPIC_BASE_URL` in `~/.claude/settings.json`
+3. `https://api.anthropic.com` (default — unchanged behavior when nothing is set)
+
+This makes claude-trace work when your traffic goes through a relay, gateway, or
+self-hosted endpoint:
+
+```bash
+# Trace traffic that goes through a local gateway
+ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude-trace
+```
+
+Because `settings.json` takes precedence over inherited environment variables in Claude
+Code, the proxy also overlays its own address via `--settings` when launching Claude —
+overriding only `ANTHROPIC_BASE_URL` while preserving every other setting (model
+mappings, tokens, etc.). The result is the link `claude → proxy → your upstream`, with
+the full conversation captured along the way.
+
+Supported upstream protocols: `http` and `https` (with automatic default ports 80/443).
 
 ## Requirements
 
