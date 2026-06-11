@@ -14,6 +14,12 @@ export interface ReverseProxyConfig {
 	includeAllRequests?: boolean;
 	openBrowser?: boolean;
 	logSensitiveHeaders?: boolean;
+	/**
+	 * Upstream base URL the proxy forwards requests to.
+	 * Follows the user's original ANTHROPIC_BASE_URL so custom gateways /
+	 * relay endpoints are supported. Defaults to https://api.anthropic.com.
+	 */
+	upstreamBaseUrl?: string;
 }
 
 export class ReverseProxyServer {
@@ -23,8 +29,9 @@ export class ReverseProxyServer {
 	private logFile: string;
 	private htmlFile: string;
 	private htmlGenerator: HTMLGenerator;
-	private targetHost = "api.anthropic.com";
-	private targetPort = 443;
+	private upstreamHost: string;
+	private upstreamPort: number;
+	private upstreamProtocol: "http:" | "https:";
 
 	constructor(config: ReverseProxyConfig = {}) {
 		this.config = {
@@ -34,7 +41,26 @@ export class ReverseProxyServer {
 			includeAllRequests: config.includeAllRequests || false,
 			openBrowser: config.openBrowser || false,
 			logSensitiveHeaders: config.logSensitiveHeaders || false,
+			upstreamBaseUrl: config.upstreamBaseUrl || "https://api.anthropic.com",
 		};
+
+		// Resolve the upstream target from the configured base URL.
+		// Supports any host/port and both http and https so custom relays
+		// (e.g. a local gateway on http://127.0.0.1:PORT) work as well as the
+		// default Anthropic API.
+		const upstream = new URL(this.config.upstreamBaseUrl);
+		if (upstream.protocol !== "http:" && upstream.protocol !== "https:") {
+			throw new Error(
+				`Unsupported ANTHROPIC_BASE_URL protocol "${upstream.protocol}" (expected http: or https:)`,
+			);
+		}
+		this.upstreamProtocol = upstream.protocol;
+		this.upstreamHost = upstream.hostname;
+		this.upstreamPort = upstream.port
+			? parseInt(upstream.port, 10)
+			: upstream.protocol === "https:"
+				? 443
+				: 80;
 
 		// Create log directory if needed
 		if (!fs.existsSync(this.config.logDirectory)) {
@@ -171,19 +197,21 @@ export class ReverseProxyServer {
 		});
 
 		req.on("end", () => {
-			// Forward the request to the real Anthropic API
-			const options: https.RequestOptions = {
-				hostname: this.targetHost,
-				port: this.targetPort,
+			// Forward the request to the configured upstream (Anthropic API by
+			// default, or any custom base URL such as a local relay/gateway).
+			const transport = this.upstreamProtocol === "https:" ? https : http;
+			const options: http.RequestOptions = {
+				hostname: this.upstreamHost,
+				port: this.upstreamPort,
 				path: req.url,
 				method: req.method,
 				headers: {
 					...req.headers,
-					host: this.targetHost,
+					host: this.upstreamHost,
 				},
 			};
 
-			const proxyReq = https.request(options, (proxyRes) => {
+			const proxyReq = transport.request(options, (proxyRes) => {
 				const responseTimestamp = Date.now();
 				const responseChunks: Buffer[] = [];
 
@@ -196,7 +224,7 @@ export class ReverseProxyServer {
 					res.end();
 
 					// Check if this is a request we should log
-					const url = `https://${this.targetHost}${req.url}`;
+					const url = `${this.upstreamProtocol}//${this.upstreamHost}:${this.upstreamPort}${req.url}`;
 					const shouldLog =
 						this.config.includeAllRequests || (req.url && req.url.includes("/v1/messages"));
 

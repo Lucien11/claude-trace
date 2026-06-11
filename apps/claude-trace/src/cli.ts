@@ -303,12 +303,22 @@ async function runClaudeNativeWithProxy(
 	log("Using reverse proxy mode for native binary", "yellow");
 	console.log("");
 
+	// Capture the user's original ANTHROPIC_BASE_URL *before* it gets
+	// overridden below to point at our proxy. The proxy forwards to this
+	// upstream, so custom relays/gateways are supported. Reading it here
+	// (prior to the spawn override) also avoids the proxy pointing at itself.
+	const upstreamBaseUrl = process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
+	if (process.env.ANTHROPIC_BASE_URL) {
+		log(`Forwarding to upstream: ${upstreamBaseUrl}`, "blue");
+	}
+
 	// Start the reverse proxy
 	const proxy = new ReverseProxyServer({
 		logBaseName: logBaseName,
 		includeAllRequests: includeAllRequests,
 		openBrowser: openInBrowser,
 		logSensitiveHeaders: logSensitiveHeaders,
+		upstreamBaseUrl: upstreamBaseUrl,
 	});
 
 	let proxyInfo: { port: number; url: string };
