@@ -291,6 +291,46 @@ function isNativeBinary(filePath: string): boolean {
 	}
 }
 
+// Resolve the upstream base URL the proxy should forward to.
+//
+// Priority:
+//   1. ANTHROPIC_BASE_URL from the environment
+//   2. env.ANTHROPIC_BASE_URL in ~/.claude/settings.json
+//   3. Default https://api.anthropic.com
+//
+// Claude Code loads settings.json itself and its env block takes precedence
+// over the inherited process env. So when a user pins ANTHROPIC_BASE_URL there
+// (e.g. pointing at a local relay/gateway), we must read it from the same
+// place — otherwise the proxy would forward to the wrong upstream and capture
+// nothing.
+function resolveUpstreamBaseUrl(): string {
+	if (process.env.ANTHROPIC_BASE_URL) {
+		return process.env.ANTHROPIC_BASE_URL;
+	}
+
+	const home = process.env.HOME || process.env.USERPROFILE;
+	if (home) {
+		const settingsPath = path.join(home, ".claude", "settings.json");
+		try {
+			const raw = fs.readFileSync(settingsPath, "utf-8");
+			const parsed: unknown = JSON.parse(raw);
+			if (parsed && typeof parsed === "object" && "env" in parsed) {
+				const env = (parsed as { env?: unknown }).env;
+				if (env && typeof env === "object" && "ANTHROPIC_BASE_URL" in env) {
+					const url = (env as { ANTHROPIC_BASE_URL?: unknown }).ANTHROPIC_BASE_URL;
+					if (typeof url === "string" && url.length > 0) {
+						return url;
+					}
+				}
+			}
+		} catch {
+			// settings.json missing or unreadable — fall through to default
+		}
+	}
+
+	return "https://api.anthropic.com";
+}
+
 // Run Claude as a native binary with reverse proxy interception
 async function runClaudeNativeWithProxy(
 	claudePath: string,
@@ -303,12 +343,11 @@ async function runClaudeNativeWithProxy(
 	log("Using reverse proxy mode for native binary", "yellow");
 	console.log("");
 
-	// Capture the user's original ANTHROPIC_BASE_URL *before* it gets
-	// overridden below to point at our proxy. The proxy forwards to this
-	// upstream, so custom relays/gateways are supported. Reading it here
-	// (prior to the spawn override) also avoids the proxy pointing at itself.
-	const upstreamBaseUrl = process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
-	if (process.env.ANTHROPIC_BASE_URL) {
+	// Resolve the real upstream (env var, then ~/.claude/settings.json, then
+	// the Anthropic API) *before* we override ANTHROPIC_BASE_URL to point at
+	// the proxy below. This is also what avoids the proxy pointing at itself.
+	const upstreamBaseUrl = resolveUpstreamBaseUrl();
+	if (upstreamBaseUrl !== "https://api.anthropic.com") {
 		log(`Forwarding to upstream: ${upstreamBaseUrl}`, "blue");
 	}
 
@@ -332,9 +371,17 @@ async function runClaudeNativeWithProxy(
 		process.exit(1);
 	}
 
-	// Spawn Claude with ANTHROPIC_BASE_URL pointing to our HTTP proxy
-	// Using HTTP avoids TLS certificate issues with Bun binaries
-	const child: ChildProcess = spawn(claudePath, claudeArgs, {
+	// Spawn Claude with ANTHROPIC_BASE_URL pointing to our HTTP proxy.
+	// Using HTTP avoids TLS certificate issues with Bun binaries.
+	//
+	// We override the base URL in two places because settings.json wins over
+	// the inherited environment in Claude Code:
+	//   - the env var (covers the default / no-settings case)
+	//   - a `--settings` overlay (overrides a pinned ANTHROPIC_BASE_URL in
+	//     ~/.claude/settings.json; only this key is overlaid, everything else
+	//     in the user's settings is preserved)
+	const settingsOverride = JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxyInfo.url } });
+	const child: ChildProcess = spawn(claudePath, ["--settings", settingsOverride, ...claudeArgs], {
 		env: {
 			...process.env,
 			ANTHROPIC_BASE_URL: proxyInfo.url,
